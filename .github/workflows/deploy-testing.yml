@@ -20,9 +20,9 @@ jobs:
 
       - name: Update testing environment state in Gist
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
-          # Prepare the content with metadata
+          # Create content file
           echo "// Testing Environment State" > env_state.txt
           echo "// Last deployed on: $(date)" >> env_state.txt
           echo "// From tag: ${{ env.TAG_NAME }}" >> env_state.txt
@@ -32,35 +32,57 @@ jobs:
           echo "--------------------------------" >> env_state.txt
           cat main.js >> env_state.txt
 
-          # If this is the first deployment, create a new gist
-          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
-            RESPONSE=$(curl -X POST -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/gists \
-              -d '{
-                "description": "Testing Environment State for ${{ github.repository }}",
-                "public": true,
-                "files": {
+          # Function to create JSON payload
+          create_payload() {
+            jq -n \
+              --arg desc "Testing Environment State for ${{ github.repository }}" \
+              --arg content "$(cat env_state.txt)" \
+              '{
+                description: $desc,
+                public: true,
+                files: {
                   "testing_environment.txt": {
-                    "content": "'"$(cat env_state.txt)"'"
-                  }
-                }
-              }')
-            GIST_ID=$(echo $RESPONSE | jq -r .id)
-            echo "Please store the Gist ID: $GIST_ID in your repository variables as TESTING_GIST_ID"
-          else
-            # Update existing gist
-            curl -X PATCH -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              https://api.github.com/gists/${{ vars.TESTING_GIST_ID }} \
-              -d '{
-                "description": "Testing Environment State for ${{ github.repository }}",
-                "files": {
-                  "testing_environment.txt": {
-                    "content": "'"$(cat env_state.txt)"'"
+                    content: $content
                   }
                 }
               }'
+          }
+
+          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+            echo "Creating new Gist..."
+            RESPONSE=$(curl -s -X POST \
+              -H "Authorization: Bearer ${{ secrets.GIST_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              https://api.github.com/gists \
+              -d "$(create_payload)")
+
+            GIST_ID=$(echo "$RESPONSE" | jq -r '.id')
+            if [ "$GIST_ID" = "null" ] || [ -z "$GIST_ID" ]; then
+              echo "Error creating Gist. Response:"
+              echo "$RESPONSE" | jq '.'
+              exit 1
+            fi
+            echo "Successfully created Gist with ID: $GIST_ID"
+            echo "TESTING_GIST_ID=$GIST_ID" >> $GITHUB_ENV
+          else
+            echo "Updating existing Gist..."
+            curl -s -X PATCH \
+              -H "Authorization: Bearer ${{ secrets.GIST_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: application/json" \
+              "https://api.github.com/gists/${{ vars.TESTING_GIST_ID }}" \
+              -d "$(create_payload)"
+          fi
+
+      - name: Create deployment status
+        run: |
+          echo "🚀 Demo deployment to testing complete"
+          echo "Version: ${{ env.TAG_NAME }}"
+          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+            echo "First deployment: Check the action logs for the Gist ID"
+          else
+            echo "View testing environment state at: https://gist.github.com/${{ vars.TESTING_GIST_ID }}"
           fi
 
       - name: Create deployment status

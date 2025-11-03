@@ -1,0 +1,74 @@
+name: Demo - Deploy to Testing Environment
+
+on:
+  push:
+    tags:
+      - "testing-[0-9][0-9][0-9][0-9]-[0-9][0-9]-v*"
+
+jobs:
+  deploy-testing:
+    runs-on: ubuntu-latest
+    environment: testing
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract tag information
+        run: |
+          echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Update testing environment state in Gist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Prepare the content with metadata
+          echo "// Testing Environment State" > env_state.txt
+          echo "// Last deployed on: $(date)" >> env_state.txt
+          echo "// From tag: ${{ env.TAG_NAME }}" >> env_state.txt
+          echo "// Repository: ${{ github.repository }}" >> env_state.txt
+          echo "" >> env_state.txt
+          echo "Features currently in testing:" >> env_state.txt
+          echo "--------------------------------" >> env_state.txt
+          cat main.js >> env_state.txt
+
+          # If this is the first deployment, create a new gist
+          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+            RESPONSE=$(curl -X POST -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/gists \
+              -d '{
+                "description": "Testing Environment State for ${{ github.repository }}",
+                "public": true,
+                "files": {
+                  "testing_environment.txt": {
+                    "content": "'"$(cat env_state.txt)"'"
+                  }
+                }
+              }')
+            GIST_ID=$(echo $RESPONSE | jq -r .id)
+            echo "Please store the Gist ID: $GIST_ID in your repository variables as TESTING_GIST_ID"
+          else
+            # Update existing gist
+            curl -X PATCH -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/gists/${{ vars.TESTING_GIST_ID }} \
+              -d '{
+                "description": "Testing Environment State for ${{ github.repository }}",
+                "files": {
+                  "testing_environment.txt": {
+                    "content": "'"$(cat env_state.txt)"'"
+                  }
+                }
+              }'
+          fi
+
+      - name: Create deployment status
+        run: |
+          echo "🚀 Demo deployment to testing complete"
+          echo "Version: ${{ env.TAG_NAME }}"
+          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+            echo "First deployment: Please check the action logs for the Gist ID and store it in repository variables"
+          else
+            echo "View current testing environment state at: https://gist.github.com/${{ vars.TESTING_GIST_ID }}"
+          fi

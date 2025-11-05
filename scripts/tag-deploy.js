@@ -37,10 +37,11 @@ const out = execSync(`git tag -l "${pattern}" --sort=-version:refname`, {
 }).trim();
 if (out) latest = out.split("\n")[0].trim();
 
-const current = latest.match(/-v(\d+)$/);
+const current = latest?.match(/-v(\d+)$/);
 const next = current && current[1] ? parseInt(current[1], 10) + 1 : 1;
 
-const tag = `${envName}-${year}-${month}-v${next}`;
+const tagName = envName === "production" ? "release" : envName;
+const tag = `${tagName}-${year}-${month}-v${next}`;
 
 const cmds = [`git tag ${tag}`, `git push origin ${tag}`];
 

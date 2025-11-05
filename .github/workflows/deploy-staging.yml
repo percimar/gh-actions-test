@@ -1,14 +1,14 @@
-name: Demo - Deploy to Testing Environment
+name: Demo - Deploy to Staging Environment
 
 on:
   push:
     tags:
-      - "testing-[0-9][0-9][0-9][0-9]-[0-9][0-9]-v*"
+      - "staging-[0-9][0-9][0-9][0-9]-[0-9][0-9]-v*"
 
 jobs:
-  deploy-testing:
+  deploy-staging:
     runs-on: ubuntu-latest
-    environment: testing
+    environment: staging
 
     steps:
       - name: Checkout code
@@ -18,37 +18,37 @@ jobs:
         run: |
           echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Update testing environment state in Gist
+      - name: Update staging environment state in Gist
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           # Create content file
-          echo "// Testing Environment State" > env_state.txt
+          echo "// Staging Environment State" > env_state.txt
           echo "// Last deployed on: $(date)" >> env_state.txt
           echo "// From tag: ${{ env.TAG_NAME }}" >> env_state.txt
           echo "// Repository: ${{ github.repository }}" >> env_state.txt
           echo "" >> env_state.txt
-          echo "Features currently in testing:" >> env_state.txt
+          echo "Features currently in staging:" >> env_state.txt
           echo "--------------------------------" >> env_state.txt
           cat main.js >> env_state.txt
 
           # Function to create JSON payload
           create_payload() {
             jq -n \
-              --arg desc "Testing Environment State for ${{ github.repository }}" \
+              --arg desc "Staging Environment State for ${{ github.repository }}" \
               --arg content "$(cat env_state.txt)" \
               '{
                 description: $desc,
                 public: true,
                 files: {
-                  "testing_environment.txt": {
+                  "staging_environment.txt": {
                     content: $content
                   }
                 }
               }'
           }
 
-          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+          if [ -z "${{ vars.STAGING_GIST_ID }}" ]; then
             echo "Creating new Gist..."
             RESPONSE=$(curl -s -X POST \
               -H "Authorization: Bearer ${{ secrets.GIST_TOKEN }}" \
@@ -64,23 +64,23 @@ jobs:
               exit 1
             fi
             echo "Successfully created Gist with ID: $GIST_ID"
-            echo "TESTING_GIST_ID=$GIST_ID" >> $GITHUB_ENV
+            echo "STAGING_GIST_ID=$GIST_ID" >> $GITHUB_ENV
           else
             echo "Updating existing Gist..."
             curl -s -X PATCH \
               -H "Authorization: Bearer ${{ secrets.GIST_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               -H "Content-Type: application/json" \
-              "https://api.github.com/gists/${{ vars.TESTING_GIST_ID }}" \
+              "https://api.github.com/gists/${{ vars.STAGING_GIST_ID }}" \
               -d "$(create_payload)"
           fi
 
       - name: Create deployment status
         run: |
-          echo "🚀 Demo deployment to testing complete"
+          echo "🚀 Demo deployment to staging complete"
           echo "Version: ${{ env.TAG_NAME }}"
-          if [ -z "${{ vars.TESTING_GIST_ID }}" ]; then
+          if [ -z "${{ vars.STAGING_GIST_ID }}" ]; then
             echo "First deployment: Check the action logs for the Gist ID"
           else
-            echo "View testing environment state at: https://gist.github.com/${{ vars.TESTING_GIST_ID }}"
+            echo "View staging environment state at: https://gist.github.com/${{ vars.STAGING_GIST_ID }}"
           fi

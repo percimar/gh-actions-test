@@ -1,0 +1,96 @@
+name: Deploy to Production Gist on Release Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure jq is installed
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y jq
+          else
+            echo "jq already installed"
+          fi
+
+      - name: Prepare production environment snapshot
+        run: |
+          echo "// Production Environment State" > env_state.txt
+          echo "// Deployed on: $(date -u)" >> env_state.txt
+          echo "// Release: ${{ github.event.release.tag_name }} (published by ${{ github.event.release.author.login }})" >> env_state.txt
+          echo "" >> env_state.txt
+          echo "Features in release:" >> env_state.txt
+          echo "---------------------" >> env_state.txt
+          cat main.js >> env_state.txt
+
+      - name: Create or update production Gist
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GIST_TOKEN" ]; then
+            echo "No GIST_TOKEN secret found. Please create a personal access token with 'gist' scope and add it as repository secret 'GIST_TOKEN'." >&2
+            exit 1
+          fi
+
+          REPO="${{ github.repository }}"
+
+          # Build JSON payload with jq for safe escaping
+          create_payload() {
+            jq -n --arg desc "Production Environment State for $REPO" --arg content "$(cat env_state.txt)" \
+              '{description: $desc, public: true, files: {"production_environment.txt": {content: $content}}}'
+          }
+
+          if [ -z "${{ vars.PRODUCTION_GIST_ID }}" ]; then
+            echo "PRODUCTION_GIST_ID variable is not set — creating a new public Gist for production..."
+            RESPONSE=$(curl -s -X POST \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/gists \
+              -d "$(create_payload)")
+
+            GIST_ID=$(echo "$RESPONSE" | jq -r .id)
+            if [ "$GIST_ID" = "null" ] || [ -z "$GIST_ID" ]; then
+              echo "Failed to create Gist. Response:" >&2
+              echo "$RESPONSE" | jq '.' >&2 || true
+              exit 1
+            fi
+
+            echo "Created production Gist: https://gist.github.com/$GIST_ID"
+            echo "Please store this Gist ID in repository variables as PRODUCTION_GIST_ID: $GIST_ID"
+
+          else
+            echo "Updating existing production Gist: ${{ vars.PRODUCTION_GIST_ID }}"
+            RESPONSE=$(curl -s -X PATCH \
+              -H "Authorization: Bearer $GIST_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/gists/${{ vars.PRODUCTION_GIST_ID }}" \
+              -d "$(create_payload)")
+
+            # Quick check for errors
+            MESSAGE=$(echo "$RESPONSE" | jq -r '.message // empty')
+            if [ -n "$MESSAGE" ]; then
+              echo "Gist update API returned message: $MESSAGE" >&2
+              echo "$RESPONSE" | jq '.' >&2 || true
+              exit 1
+            fi
+
+            echo "Updated production Gist: https://gist.github.com/${{ vars.PRODUCTION_GIST_ID }}"
+          fi
+
+      - name: Finish
+        run: |
+          echo "Production gist deployment finished."
+          if [ -z "${{ vars.PRODUCTION_GIST_ID }}" ]; then
+            echo "New Gist created — remember to add PRODUCTION_GIST_ID to repository variables for future updates."
+          else
+            echo "Updated Gist: https://gist.github.com/${{ vars.PRODUCTION_GIST_ID }}"
+          fi

@@ -19,18 +19,20 @@ jobs:
 
       - name: Create draft release with auto-generated notes
         id: create_release
-        uses: actions/create-release@v1
+        uses: softprops/action-gh-release@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           draft: true
           prerelease: false
           generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Output release info
         run: |
           echo "Draft release created (if successful)."
+          # softprops/action-gh-release exposes outputs via the action's outputs
           echo "Release id: ${{ steps.create_release.outputs.id }}"
           echo "HTML URL: ${{ steps.create_release.outputs.html_url }}"
           echo "Upload URL: ${{ steps.create_release.outputs.upload_url }}"
